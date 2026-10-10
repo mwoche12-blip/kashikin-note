@@ -202,6 +202,26 @@
   document.querySelectorAll(".nav [data-nav]").forEach(b => b.addEventListener("click", () => go(b.dataset.nav)));
   $(".brand").addEventListener("click", () => go("home"));
 
+  // ===================== アイコン =====================
+  const ICON_PATHS = {
+    book: '<path d="M4 19.5V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2.5z"/><path d="M8 7h7M8 11h5"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    ox: '<circle cx="7.5" cy="12" r="4.5"/><path d="m14 7.5 7 9M21 7.5l-7 9"/>',
+    cards: '<rect x="3" y="7" width="13" height="14" rx="2"/><path d="M7 3h11a3 3 0 0 1 3 3v11"/>',
+    timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
+    spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5-6"/>',
+    cross: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
+    chart: '<path d="M4 20V11M10 20V5M16 20v-6M21 20H3"/>',
+    pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 7 4 4"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+    flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  };
+  function icon(n) { return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON_PATHS[n] || ""}</svg>`; }
+
   // ===================== ホーム =====================
   function subjectStats(s) {
     const qs = QUESTIONS.filter(q => q.subject === s);
@@ -212,49 +232,106 @@
   function wrongQuestions() { return QUESTIONS.filter(q => prog.q[q.id] && prog.q[q.id].ok === false); }
   function dueItems() { return TF_ITEMS.filter(it => isDue(prog.t[it.qid + "|" + it.key])); }
   function dueCards() { return CARDS.cards.filter(c => isDue(prog.c[c.id])); }
+  // 教科書の章（論点）ごとの成績。関連過去問は章のキーワードで対応づけている
+  const ALL_CHAPTERS = [];
+  TEXTBOOK.forEach(sec => sec.chapters.forEach(ch => ALL_CHAPTERS.push(Object.assign({ subject: sec.subject }, ch))));
+  function chapterStats(ch) {
+    const qs = chapterQuestions(ch); let n = 0, c = 0;
+    qs.forEach(q => { const r = prog.q[q.id]; if (r) { n++; if (r.ok) c++; } });
+    return { ch, qs, n, c, acc: pct(c, n) };
+  }
+  // おすすめ：①正答率70%未満の論点（3問以上解いたもの）→ ②まだ解いていない論点 → ③模試
+  function recommendation() {
+    const st = ALL_CHAPTERS.map(chapterStats).filter(x => x.qs.length);
+    const weak = st.filter(x => x.n >= 3 && x.acc < 70).sort((a, b) => a.acc - b.acc || b.n - a.n)[0];
+    if (weak) return Object.assign(weak, { kind: "weak", title: `苦手な論点：${weak.ch.title}`, text: `解いた${weak.n}問の正答率は${weak.acc}%です。教科書で要点を確かめてから、この論点の過去問を解き直しましょう。` });
+    if (!Object.keys(prog.q).length) { const f = st[0]; return f && Object.assign(f, { kind: "start", title: `まずは「${f.ch.title}」から`, text: "教科書を1章読んで、その章の過去問を解いてみましょう。間違えた肢には、どこが誤りかを赤字で示します。" }); }
+    const fresh = st.filter(x => x.n === 0).sort((a, b) => a.ch.subject - b.ch.subject || b.qs.length - a.qs.length)[0];
+    if (fresh) return Object.assign(fresh, { kind: "new", title: `まだ解いていない論点：${fresh.ch.title}`, text: `この論点の過去問が${fresh.qs.length}問あります。教科書で読んでから解くと効率的です。` });
+    return { kind: "mock", title: "本番模試で仕上げましょう", text: "全部の論点に手をつけました。50問・2時間の模試で、時間配分と分野ごとの取りこぼしを確かめましょう。" };
+  }
+  function startChapterQuiz(st) {
+    const order = q => { const r = prog.q[q.id]; return !r ? 1 : r.ok ? 2 : 0; };   // 間違えた→未解答→正解の順
+    const ids = shuffle(st.qs).sort((a, b) => order(a) - order(b)).slice(0, 10).map(q => q.id);
+    startQuiz({ mode: "practice", title: st.ch.title, ids, back: { name: "home" } });
+  }
+  function startToday() {
+    const di = dueItems(), dc = dueCards();
+    if (di.length) return startQuiz({ mode: "tf", title: "今日の復習（〇×）", items: shuffle(di.sort(byDue(it => prog.t[it.qid + "|" + it.key])).slice(0, 50)), back: { name: "home" } });
+    if (dc.length) return startCards({ title: "暗記カードの復習", ids: shuffle(dc).map(c => c.id), back: { name: "home" } });
+    const wq = wrongQuestions();
+    if (wq.length) return startQuiz({ mode: "practice", title: "間違えた問題の復習", ids: shuffle(wq).slice(0, 10).map(q => q.id), back: { name: "home" } });
+    startQuiz({ mode: "tf", title: "〇×一問一答（10肢）", items: shuffle(TF_ITEMS.filter(it => QMAP[it.qid].exam_no >= 16)).slice(0, 10), back: { name: "home" } });
+  }
   function renderHome() {
     const days = Math.max(0, Math.ceil((EXAM_DATE - new Date()) / 86400000));
-    const explained = Object.keys(EXPLAIN).length;
+    const nq = Object.keys(prog.q).length;
     const wq = wrongQuestions().length, di = dueItems().length, dc = dueCards().length;
-    app.innerHTML = `<div class="narrow">
-      <section class="hero panel">
-        <span class="eyebrow">令和8年度 貸金業務取扱主任者資格試験</span>
-        <div class="spread">
-          <div class="countdown"><span>試験日 11月15日（日）まで</span><b>${days}</b><span>日</span></div>
-          <span class="muted small">法令の基準日：${fmtDate(CURRENT_BASE)}</span>
+    const rec = recommendation();
+    const todayLabel = di ? "今日の復習をはじめる" : dc ? "カードの復習をはじめる" : wq ? "間違えた問題を解き直す" : "〇×を10肢やってみる";
+    const modes = [
+      ["book", "book", "", "教科書で学ぶ", `4分野・${ALL_CHAPTERS.length}章の入門テキスト。条文をその場で確認できます。`, { go: "book" }],
+      ["grid", "", "c2", "回ごとに解く", "第1回〜第20回、各50問。全問に赤ペン解説つき。", { go: "practice", tab: "exam" }],
+      ["layers", "", "c3", "分野ごとに解く", "分野・回の範囲・問題数を選んで練習。", { go: "practice", tab: "subject" }],
+      ["ox", "", "c4", "〇×一問一答", `過去問の肢を1つずつ判定。${TF_ITEMS.length.toLocaleString()}肢。`, { go: "practice", tab: "tf" }],
+      ["cards", "", "c5", "数字の暗記カード", `上限金利・期間・金額など${CARDS.cards.length}枚。`, { go: "practice", tab: "cards" }],
+      ["timer", "", "c6", "本番模試", "ランダム50問・2時間。終了後に分野別に採点。", { go: "mock" }],
+    ];
+    app.innerHTML = `<div class="narrow fade-in">
+      <section class="hero">
+        <div class="hero-main">
+          <span class="eyebrow">令和8年度 貸金業務取扱主任者試験</span>
+          <div class="countdown"><span>あと</span><b>${days}</b><span>日</span></div>
+          <p class="meta">11月15日（日）13:00〜15:00・四肢択一50問・2時間</p>
+          <div class="row" style="margin-top:10px"><span class="pill">法令の基準日 ${fmtDate(CURRENT_BASE)}</span></div>
         </div>
-        <p>試験は<b>四肢択一50問・2時間</b>のマークシート方式です。4つの分野から出題され、半分以上が「法及び関係法令」です。</p>
-        <div class="grid2">${[1, 2, 3, 4].map(s => { const st = subjectStats(s); return `
-          <div class="subject-row">
-            <span><b>${SUBJECTS[s].short}</b> <span class="muted small">出題数の目安 ${SUBJECTS[s].range}</span></span>
-            <span class="small num muted">${st.seen}/${st.total}問 ${st.seen ? "正答率" + st.acc + "%" : ""}</span>
-            <div class="bar ok" style="grid-column:1/-1"><span style="width:${pct(st.seen, st.total)}%"></span></div>
-          </div>`; }).join("")}</div>
+        <div class="ring" style="--p:${pct(nq, QUESTIONS.length)}" role="img" aria-label="解いた問題 ${nq}問／${QUESTIONS.length}問"><div><span><b>${pct(nq, QUESTIONS.length)}%</b><small>解いた問題<br>${nq}/${QUESTIONS.length}</small></span></div></div>
+      </section>
+
+      <section class="panel today">
+        <div class="today-head"><h2 class="sec-title">${icon("spark")}今日の学習</h2><span class="small muted">正解したものは間をあけて出し直します</span></div>
+        <div class="stat-tiles">
+          <button type="button" class="stat-tile" data-go="practice" data-tab="wrong"><span class="lbl">${icon("ox")}〇×の復習</span><b>${di}<small>肢</small></b></button>
+          <button type="button" class="stat-tile" data-go="practice" data-tab="wrong"><span class="lbl">${icon("cards")}カード</span><b>${dc}<small>枚</small></b></button>
+          <button type="button" class="stat-tile" data-go="practice" data-tab="wrong"><span class="lbl">${icon("refresh")}解き直し</span><b>${wq}<small>問</small></b></button>
+        </div>
+        <button class="btn primary big" type="button" id="h-today">${icon("check")}${todayLabel}</button>
+        ${rec ? `<div class="recommend">${icon("target")}<div style="display:grid;gap:8px"><div><span class="eyebrow" style="color:var(--gold)">おすすめ</span><div class="ttl">${esc(rec.title)}</div><p class="small muted">${esc(rec.text)}</p></div>
+          <div class="row">${rec.ch ? `<button class="btn" type="button" id="h-rec-book">${icon("book")}教科書を読む</button><button class="btn" type="button" id="h-rec-quiz">${icon("pencil")}過去問を解く（${Math.min(10, rec.qs.length)}問）</button>` : `<button class="btn" type="button" data-go="mock">${icon("timer")}模試をはじめる</button>`}</div></div></div>` : ""}
+      </section>
+
+      <section style="display:grid;gap:12px">
+        <h2 class="sec-title">${icon("grid")}学習メニュー</h2>
+        <div class="mode-grid">${modes.map(([ic, , c, t, d, g]) => `<button class="mode-card" type="button" data-go="${g.go}" ${g.tab ? `data-tab="${g.tab}"` : ""}><span class="mi ${c}">${icon(ic)}</span><span><h3>${t}</h3><p>${d}</p></span></button>`).join("")}</div>
       </section>
 
       <section class="panel">
-        <h2>はじめての人の進め方</h2>
-        <ol class="steps">
-          <li><b>教科書</b>で分野の全体像をつかむ（まずは「法及び関係法令」から）</li>
-          <li>各章の終わりから<b>関連する過去問</b>を解き、間違えた肢の赤字を読む</li>
-          <li>慣れてきたら<b>〇×一問一答</b>で肢ごとの正誤判断を速くし、<b>暗記カード</b>で数字を覚える</li>
-          <li>毎日<b>今日の復習</b>を片づける（正解した肢やカードは、間をあけて出し直します）</li>
-          <li>仕上げに<b>本番模試</b>（ランダム50問・2時間）で時間配分を確かめる</li>
-        </ol>
+        <h2 class="sec-title">${icon("chart")}分野ごとの進み具合</h2>
+        <div style="display:grid;gap:14px">${[1, 2, 3, 4].map(s => { const st = subjectStats(s); return `
+          <div class="subject-row">
+            <span class="dot" style="background:var(--s${s})"></span>
+            <span><b>${SUBJECTS[s].short}</b> <span class="muted small hide-sm">本試験 ${SUBJECTS[s].range}</span></span>
+            <span class="small num muted">${st.seen}/${st.total}問${st.seen ? `・正答率 <b style="color:var(--ink)">${st.acc}%</b>` : ""}</span>
+            <div class="bar s${s}"><span style="width:${pct(st.seen, st.total)}%"></span></div>
+          </div>`; }).join("")}</div>
       </section>
 
-      <section class="grid2">
-        <button class="panel mode-card" type="button" data-go="book"><h3>教科書で学ぶ</h3><p class="small muted">4分野の入門テキスト。条文をその場で確認できます。</p></button>
-        <button class="panel mode-card" type="button" data-go="practice" data-tab="exam"><h3>回ごとに解く</h3><p class="small muted">第1回〜第20回、各50問。解説付きは${explained ? "第20回など" + explained + "問" : "準備中"}。</p></button>
-        <button class="panel mode-card" type="button" data-go="practice" data-tab="subject"><h3>分野ごとに解く</h3><p class="small muted">分野・回の範囲・問題数を選んで練習します。</p></button>
-        <button class="panel mode-card" type="button" data-go="practice" data-tab="tf"><h3>〇×一問一答</h3><p class="small muted">過去問の肢を1つずつ判定。${TF_ITEMS.length.toLocaleString()}肢あります。</p></button>
-        <button class="panel mode-card" type="button" data-go="practice" data-tab="cards"><h3>数字の暗記カード</h3><p class="small muted">上限金利・期間・金額など${CARDS.cards.length}枚。覚えた度合いに合わせて出し直します。</p></button>
-        <button class="panel mode-card" type="button" data-go="mock"><h3>本番模試</h3><p class="small muted">全回からランダム50問。制限時間2時間、終了後に採点。</p></button>
-        <button class="panel mode-card" type="button" data-go="practice" data-tab="wrong"><h3>今日の復習</h3><p class="small muted">4択${wq}問・〇×${di}肢・カード${dc}枚が復習待ちです。</p></button>
-      </section>
-      <p class="small muted">これは日本貸金業協会の公式アプリではありません。過去問と正答の出典：日本貸金業協会「貸金業務取扱主任者資格試験問題」。条文の出典：e-Gov法令検索。学習履歴はこのブラウザの中だけに保存されます。<button type="button" class="inline-ref" data-about="1">このアプリについて（出典・免責事項）</button></p>
+      ${nq < 30 ? `<section class="panel">
+        <h2 class="sec-title">${icon("flag")}はじめての人の進め方</h2>
+        <ol class="steps">
+          <li><span><b>教科書</b>で分野の全体像をつかむ（まずは「法及び関係法令」から）</span></li>
+          <li><span>各章の終わりから<b>関連する過去問</b>を解き、間違えた肢の赤字を読む</span></li>
+          <li><span><b>〇×一問一答</b>で肢ごとの判断を速くし、<b>暗記カード</b>で数字を覚える</span></li>
+          <li><span>毎日<b>今日の学習</b>を片づける</span></li>
+          <li><span>仕上げに<b>本番模試</b>で時間配分を確かめる</span></li>
+        </ol>
+      </section>` : ""}
+      <p class="foot-note">これは日本貸金業協会の公式アプリではありません。過去問と正答の出典：日本貸金業協会「貸金業務取扱主任者資格試験問題」。条文の出典：e-Gov法令検索。学習記録はこのブラウザの中だけに保存されます。<br><button type="button" class="inline-ref" data-about="1">このアプリについて（出典・免責事項・誤りの報告）</button></p>
     </div>`;
     app.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => go(b.dataset.go, { tab: b.dataset.tab })));
+    $("#h-today").addEventListener("click", startToday);
+    const rb = $("#h-rec-book"); if (rb) rb.addEventListener("click", () => go("book", { ch: rec.ch.id }));
+    const rq = $("#h-rec-quiz"); if (rq) rq.addEventListener("click", () => startChapterQuiz(rec));
   }
 
   // ===================== 教科書 =====================
@@ -271,9 +348,9 @@
     const qs = chapterQuestions(cur);
     const tfs = TF_ITEMS.filter(it => qs.some(q => q.id === it.qid));
     app.innerHTML = `<div class="book">
-      <nav class="toc panel" aria-label="目次">${TEXTBOOK.map(sec => `<div><h3>${esc(SUBJECTS[sec.subject].name)}</h3><ol>${sec.chapters.map(ch => `<li><button type="button" data-ch="${ch.id}" aria-current="${ch.id === cur.id}">${esc(ch.title)}</button></li>`).join("")}</ol></div>`).join("")}</nav>
-      <article class="chapter">
-        <span class="eyebrow">${esc(SUBJECTS[cur.subject].name)}</span>
+      <nav class="toc panel" aria-label="目次">${TEXTBOOK.map(sec => `<div><h3><span class="dot" style="background:var(--s${sec.subject})"></span>${esc(SUBJECTS[sec.subject].name)}</h3><ol>${sec.chapters.map(ch => `<li><button type="button" data-ch="${ch.id}" aria-current="${ch.id === cur.id}">${esc(ch.title)}</button></li>`).join("")}</ol></div>`).join("")}</nav>
+      <article class="chapter fade-in">
+        <span class="chip s${cur.subject}" style="justify-self:start">${esc(SUBJECTS[cur.subject].name)}</span>
         <h1>${esc(cur.title)}</h1>
         ${cur.lead ? `<p class="lead">${rich(cur.lead)}</p>` : ""}
         ${(cur.body || []).map(renderBlock).join("")}
@@ -355,7 +432,7 @@
         </div>
         <p class="small muted">「今日の分」は、出し直しの日が来たカードを先に、続けてまだ見ていないカードを出します。</p>
         <div class="spread"><span class="small muted">出し直し ${due}枚・まだ見ていない ${fresh}枚・あとで出す ${all.length - due - fresh}枚</span><button class="btn primary" type="button" id="start-cards" ${pool.length ? "" : "disabled"}>はじめる（${pool.length}枚）</button></div></div>
-        <details class="panel"><summary>カードの一覧（答えつき）</summary><div class="scroll-x"><table class="tbl"><thead><tr><th>問い</th><th>答え</th><th>根拠</th></tr></thead><tbody>${all.map(c => `<tr><td>${rich(c.q)}</td><td>${richLines(c.a)}</td><td>${refButtons(c.r)}</td></tr>`).join("")}</tbody></table></div></details>`;
+        <details class="panel"><summary>カードの一覧（答えつき）</summary><div class="scroll-x"><table class="tbl"><thead><tr><th>問い</th><th>答え</th><th>根拠</th></tr></thead><tbody>${all.map(c => `<tr><td>${rich(c.q)}</td><td>${richLines(c.a)}</td><td>${refButtons(c.r)}${c.src ? `<span class="small muted">${esc(c.src)}</span>` : ""}</td></tr>`).join("")}</tbody></table></div></details>`;
     } else {
       const wq = wrongQuestions(), di = dueItems(), dc = dueCards();
       body = `<div class="panel"><p class="small muted">〇×で判定した肢と暗記カードは、正解するたびに次に出す日を<b>1日後→3日後→7日後→14日後→30日後</b>と延ばします。間違えたものは、その日のうちにもう一度出します。</p></div>
@@ -365,7 +442,7 @@
         <div class="panel"><h3>4択で間違えた問題</h3><p class="small muted">最後に解いたときに不正解だった問題です。正解すると一覧から外れます。</p><span class="num"><b>${wq.length}</b>問</span><button class="btn primary" type="button" id="rev-q" ${wq.length ? "" : "disabled"}>復習する</button></div>
       </div>`;
     }
-    app.innerHTML = `<div class="narrow"><h1>問題を解く</h1>
+    app.innerHTML = `<div class="narrow fade-in"><h1 class="page-title">${icon("pencil")}問題を解く</h1>
       <div class="seg" role="tablist">${tabs.map(([k, l]) => `<button type="button" data-tab="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}</div>`;
     app.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => go("practice", { tab: b.dataset.tab })));
     app.querySelectorAll("[data-instant]").forEach(b => b.addEventListener("click", () => { practiceForm.instant = b.dataset.instant === "1"; render(); }));
@@ -416,7 +493,7 @@
   function renderMockSetup() {
     view.tab = "mock"; setNav();
     const last = (prog.mocks || []).slice(-5).reverse();
-    app.innerHTML = `<div class="narrow"><h1>本番模試</h1>
+    app.innerHTML = `<div class="narrow fade-in"><h1 class="page-title">${icon("timer")}本番模試</h1>
       <div class="panel">
         <p>本番と同じ<b>50問・制限時間2時間</b>です。分野の配分は直近の試験と同じ（法令27・貸付けの実務15・資金需要者の保護5・財務会計3）で、問題は過去問からランダムに選びます。途中で答え合わせはせず、最後にまとめて採点します。</p>
         <label class="field">出題する回<select id="m-range"><option value="all">全20回</option><option value="recent10" ${mockForm.range === "recent10" ? "selected" : ""}>第11回以降</option><option value="recent5" ${mockForm.range === "recent5" ? "selected" : ""}>第16回以降</option></select></label>
@@ -451,14 +528,15 @@
     const exam = EXAM_BY_NO[q.exam_no];
     let html = `<div class="narrow">
       <div class="runner-bar"><div><span class="eyebrow">${esc(s.title)}</span><div class="num"><b>${s.idx + 1}</b> / ${s.list.length}${isTF ? "肢" : "問"}${(isMock || isExam) && !s.finished ? `　<span class="muted small">解答済み ${answered}</span>` : ""}</div></div>
-        <div class="row">${isMock && !s.finished ? `<span class="timer num" id="timer"></span>` : ""}<button class="btn ghost" type="button" id="q-quit">${s.finished ? "結果に戻る" : "やめる"}</button></div></div>`;
+        <div class="row">${isMock && !s.finished ? `<span class="timer num">${icon("timer")}<span id="timer"></span></span>` : ""}<button class="btn ghost" type="button" id="q-quit">${s.finished ? "結果に戻る" : "やめる"}</button></div></div>
+      <div class="progress" aria-hidden="true"><span style="width:${pct(s.idx + 1, s.list.length)}%"></span></div>`;
     if ((isMock || isExam) && !isTF) {
       html += `<div class="markgrid" aria-label="問題一覧">${s.list.map((c, i) => {
         const cls = []; if (i === s.idx) cls.push("cur");
         if (s.finished) cls.push(isCorrect(QMAP[c.qid], s.answers[i]) ? "ok" : "ng"); else { if (s.answers[i] != null) cls.push("done"); if (s.flags[i]) cls.push("flag"); }
         return `<button type="button" data-jump="${i}" class="${cls.join(" ")}">${i + 1}</button>`; }).join("")}</div>`;
     }
-    html += `<div class="qhead"><span class="qno">第${q.exam_no}回 問${q.no}</span><span class="chip s1">${esc(SUBJECTS[q.subject].short)}</span><span class="chip">${FMT[q.format]}</span>${EXPLAIN[q.id] ? `<span class="chip ok">解説あり</span>` : ""}<span class="chip">基準日 ${esc((exam.base_date || "").replace(/-/g, "/"))}</span></div>`;
+    html += `<div class="qhead"><span class="qno">第${q.exam_no}回 問${q.no}</span><span class="chip s${q.subject}">${esc(SUBJECTS[q.subject].short)}</span><span class="chip">${FMT[q.format]}</span>${EXPLAIN[q.id] ? `<span class="chip ok">解説あり</span>` : ""}<span class="chip">基準日 ${esc((exam.base_date || "").replace(/-/g, "/"))}</span></div>`;
     html += isTF ? tfSheet(q, cur, s) : questionSheet(q, s.answers[s.idx], showReview);
     if (isTF) {
       if (s.checked[s.idx]) html += tfReview(q, cur, s.answers[s.idx]);
@@ -477,9 +555,14 @@
     bindQuiz(q, cur);
     if (isMock && !s.finished) startTimer();
   }
+  function tableHtml(q) {
+    const t = q.table; if (!t) return "";
+    return `<div class="scroll-x"><table class="q-table">${t.caption ? `<caption class="small" style="text-align:left;font-weight:700;padding-bottom:4px">${esc(t.caption)}</caption>` : ""}<thead><tr>${t.head.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${t.rows.map(r => `<tr>${r.map((x, i) => `<td class="${i ? "r" : ""}">${esc(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
   function questionSheet(q, ans, review) {
     const shortOpts = q.options.every(o => o.text.length <= 14);
     let h = `<section class="sheet"><p class="stem">${esc(q.stem)}</p>`;
+    h += tableHtml(q);
     if (q.has_table) h += `<div class="notice">この問題には表があります。表の内容は問題文の中に1行で入っています。元の表は問題用紙PDF（${esc(EXAM_BY_NO[q.exam_no].source_question_pdf)}）で確認できます。</div>`;
     if (q.statements.length) h += `<ul class="stmts">${q.statements.map(st => `<li class="stmt"><span class="lb">${LABEL_Z[st.label]}</span><span>${esc(st.text)}</span></li>`).join("")}</ul>`;
     if (q.note) h += `<p class="qnote">${esc(q.note)}</p>`;
@@ -499,8 +582,8 @@
   }
   function questionReview(q, ans) {
     const ok = isCorrect(q, ans); const ex = explainFor(q);
-    let h = `<section class="review panel">
-      <div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}<span class="small muted" style="font-weight:400">正解は ${OPT_MARK[q.answer - 1]}${ans ? `／あなたの解答 ${OPT_MARK[ans - 1]}` : "／未解答"}</span></div>`;
+    let h = `<section class="review panel ${ok ? "is-ok" : "is-ng"} fade-in">
+      <div class="verdict ${ok ? "ok" : "ng"}">${icon(ok ? "check" : "cross")}${ok ? "正解" : "不正解"}<span class="small muted" style="font-weight:400">正解は ${OPT_MARK[q.answer - 1]}${ans ? `／あなたの解答 ${OPT_MARK[ans - 1]}` : "／未解答"}</span></div>`;
     if (ex && ex.s) h += `<p>${rich(ex.s)}</p>`;
     h += lawChangeNote(q, ex);
     const items = itemsOf(q);
@@ -529,7 +612,7 @@
     const it = itemsOf(q).find(x => x.key === cur.key);
     const mark = q.format === "single" ? OPT_MARK[+cur.key - 1] : LABEL_Z[cur.key];
     const ans = s.answers[s.idx];
-    let h = `<section class="sheet"><p class="small muted">${examLabel(q.exam_no)} 問${q.no}の肢を〇×形式に改題</p><p class="stem context">${esc(q.stem)}</p>${q.note ? `<p class="qnote">${esc(q.note)}</p>` : ""}
+    let h = `<section class="sheet"><p class="small muted">${examLabel(q.exam_no)} 問${q.no}の肢を〇×形式に改題</p><p class="stem context">${esc(q.stem)}</p>${tableHtml(q)}${q.note ? `<p class="qnote">${esc(q.note)}</p>` : ""}
       <div class="stmt" style="font-size:1.05rem"><span class="lb">${mark}</span><span>${esc(it.text)}</span></div></section>`;
     if (!s.checked[s.idx]) h += `<div class="tf-buttons"><button class="btn" type="button" data-tf="1">〇<small>適切・該当する</small></button><button class="btn" type="button" data-tf="0">×<small>適切でない・該当しない</small></button></div>`;
     else {
@@ -540,7 +623,7 @@
   }
   function tfReview(q, cur, ans) {
     const ok = ans === cur.truth; const ex = explainFor(q); const exi = ex && ex.items ? ex.items[cur.key] : null;
-    let h = `<section class="review panel"><div class="verdict ${ok ? "ok" : "ng"}">${ok ? "正解" : "不正解"}<span class="small muted" style="font-weight:400">この肢は ${cur.truth ? "〇（適切・該当する）" : "×（適切でない・該当しない）"}</span></div>`;
+    let h = `<section class="review panel ${ok ? "is-ok" : "is-ng"} fade-in"><div class="verdict ${ok ? "ok" : "ng"}">${icon(ok ? "check" : "cross")}${ok ? "正解" : "不正解"}<span class="small muted" style="font-weight:400">この肢は ${cur.truth ? "〇（適切・該当する）" : "×（適切でない・該当しない）"}</span></div>`;
     h += lawChangeNote(q, ex);
     if (exi) { if (exi.p) h += `<p class="redpen">${rich(exi.p)}</p>`; if (exi.w) h += `<p class="why">${rich(exi.w)}</p>`; h += refButtons(exi.r); }
     else { h += `<p class="pending">この肢の解説はまだありません。正誤は公式の正答から判定しています。</p>`; if (q.refs.length) h += `<div><span class="eyebrow">問題文に出てくる条文</span>${refButtons(q.refs)}</div>`; }
@@ -655,10 +738,11 @@
     const c = CARD_MAP[s.ids[s.idx]]; const r = prog.c[c.id];
     app.innerHTML = `<div class="narrow">
       <div class="runner-bar"><div><span class="eyebrow">${esc(s.title)}</span><div class="num"><b>${s.idx + 1}</b> / ${s.ids.length}枚</div></div><button class="btn ghost" type="button" id="c-quit">やめる</button></div>
-      <section class="sheet">
+      <div class="progress" aria-hidden="true"><span style="width:${pct(s.idx + 1, s.ids.length)}%"></span></div>
+      <section class="sheet flash fade-in">
         <div class="row"><span class="chip s1">${esc(CAT_NAME[c.cat] || "")}</span><span class="chip">${r ? "前回：" + (r.ok ? "覚えていた" : "まだ") : "はじめて"}</span></div>
         <p class="stem">${rich(c.q)}</p>
-        ${s.shown ? `<div class="flash-a">${richLines(c.a)}</div>${c.w ? `<p class="why">${rich(c.w)}</p>` : ""}${refButtons(c.r)}` : ""}
+        ${s.shown ? `<div class="flash-a">${richLines(c.a)}</div>${c.w ? `<p class="why">${rich(c.w)}</p>` : ""}${refButtons(c.r)}${c.src ? `<p class="small muted">根拠：${esc(c.src)}</p>` : ""}` : ""}
       </section>
       ${s.shown ? `<div class="tf-buttons"><button class="btn" type="button" data-know="1">覚えていた<small>次はしばらくあとに出す</small></button><button class="btn" type="button" data-know="0">まだ<small>今日のうちにもう一度出す</small></button></div>`
         : `<div class="tf-buttons one"><button class="btn primary" type="button" id="c-show">答えを見る</button></div>`}
@@ -692,7 +776,7 @@
       ["個人情報保護", "個人情報保護委員会・金融庁の個人情報保護に関するガイドライン", "https://www.ppc.go.jp/"],
       ["企業会計原則", "企業会計審議会「企業会計原則」「企業会計原則注解」（企業会計基準委員会の会計基準検索システムより）", "https://www.asb-j.jp/"],
     ];
-    app.innerHTML = `<div class="narrow"><h1>このアプリについて</h1>
+    app.innerHTML = `<div class="narrow fade-in"><h1 class="page-title">${icon("info")}このアプリについて</h1>
       <section class="panel"><h2>概要</h2>
         <p>貸金業務取扱主任者資格試験の学習用アプリです。<b>日本貸金業協会その他の団体の公式アプリではなく、これらの団体とは関係ありません。</b></p>
         <p>解説・教科書・暗記カードは、下の資料と過去問の公式正答をもとに、このアプリの作者が作成したものです。</p></section>
@@ -710,6 +794,10 @@
           <li>過去問の公式正答は、それぞれの回の試験の基準日の法令によるものです。その後の法改正で結論が変わった肢には、解説で「現行法では」と示しています。</li>
           <li>試験の正式な情報（日程・出題範囲・合格基準など）は、日本貸金業協会のサイトで確認してください。</li>
         </ul></section>
+      <section class="panel"><h2>誤りの報告・ご意見</h2>
+        <p>解説の誤りや、法改正への未対応などに気づいたら、GitHub の Issues（報告用の掲示板）で知らせてください。どの問題か（例：第20回 問12の肢③）と、根拠になる条文などを書いてもらえると助かります。</p>
+        <div><a class="btn" href="https://github.com/mwoche12-blip/kashikin-note/issues" target="_blank" rel="noopener">誤りを報告する（GitHub）</a></div>
+        <p class="small muted">報告には GitHub のアカウント（無料）が必要です。報告の内容は公開されます。</p></section>
       <section class="panel"><h2>データの扱い</h2>
         <ul>
           <li>学習記録は、このブラウザの中（localStorage）だけに保存します。外部のサーバーには送信しません。</li>
@@ -722,21 +810,22 @@
   function renderRecord() {
     const nq = Object.keys(prog.q).length, nt = Object.keys(prog.t).length;
     const okq = Object.values(prog.q).filter(r => r.ok).length;
-    app.innerHTML = `<div class="narrow"><h1>学習記録</h1>
-      <section class="panel"><div class="grid4">
-        <div><span class="eyebrow">解いた問題</span><div class="num"><b style="font-size:1.6rem">${nq}</b> / ${QUESTIONS.length}</div></div>
-        <div><span class="eyebrow">最後に正解した問題</span><div class="num"><b style="font-size:1.6rem">${okq}</b></div></div>
-        <div><span class="eyebrow">判定した肢</span><div class="num"><b style="font-size:1.6rem">${nt}</b> / ${TF_ITEMS.length}</div></div>
-        <div><span class="eyebrow">学習したカード</span><div class="num"><b style="font-size:1.6rem">${Object.keys(prog.c).length}</b> / ${CARDS.cards.length}</div></div>
-        <div><span class="eyebrow">模試の回数</span><div class="num"><b style="font-size:1.6rem">${(prog.mocks || []).length}</b></div></div></div>
-        <div class="scroll-x"><table class="tbl"><thead><tr><th>分野</th><th class="r">解いた問題</th><th class="r">正答率</th></tr></thead><tbody>${[1, 2, 3, 4].map(s => { const st = subjectStats(s); return `<tr><td>${SUBJECTS[s].name}</td><td class="r">${st.seen}/${st.total}</td><td class="r">${st.seen ? st.acc + "%" : "-"}</td></tr>`; }).join("")}</tbody></table></div>
-      </section>
-      <section class="panel"><h2>別の端末・ブラウザへ移す</h2>
+    app.innerHTML = `<div class="narrow fade-in"><h1 class="page-title">${icon("chart")}学習記録</h1>
+      <section class="panel"><div class="stat-grid">
+        ${[["解いた問題", nq, "/ " + QUESTIONS.length], ["最後に正解した問題", okq, "問"], ["判定した肢", nt, "/ " + TF_ITEMS.length.toLocaleString()], ["学習したカード", Object.keys(prog.c).length, "/ " + CARDS.cards.length], ["模試の回数", (prog.mocks || []).length, "回"]].map(([l, v, u]) => `<div class="stat-big"><span class="lbl">${l}</span><span><b>${v}</b> <span class="small muted">${u}</span></span></div>`).join("")}</div></section>
+      <section class="panel"><h2 class="sec-title">${icon("layers")}分野ごとの成績</h2>
+        <div style="display:grid;gap:14px">${[1, 2, 3, 4].map(s => { const st = subjectStats(s); return `<div class="subject-row"><span class="dot" style="background:var(--s${s})"></span><span><b>${SUBJECTS[s].short}</b></span><span class="small num muted">${st.seen}/${st.total}問${st.seen ? `・正答率 <b style="color:var(--ink)">${st.acc}%</b>` : ""}</span><div class="bar s${s}"><span style="width:${st.seen ? st.acc : 0}%"></span></div></div>`; }).join("")}</div>
+        <p class="small muted">棒の長さは正答率です。</p></section>
+      ${(() => { const rows = ALL_CHAPTERS.map(chapterStats).filter(x => x.n); return rows.length ? `<section class="panel"><h2 class="sec-title">${icon("target")}論点ごとの正答率（低い順）</h2>
+        <p class="small muted">教科書の章ごとに、関連する過去問の成績をまとめました。章名を押すと教科書が開きます。</p>
+        <div class="scroll-x"><table class="tbl"><thead><tr><th>論点</th><th class="r">解いた</th><th class="r">正答率</th></tr></thead><tbody>${rows.sort((a, b) => a.acc - b.acc).map(x => `<tr><td><span style="display:flex;gap:6px;align-items:baseline"><span style="flex:none;width:8px;height:8px;border-radius:50%;background:var(--s${x.ch.subject})"></span><button type="button" class="inline-ref" data-chap="${x.ch.id}">${esc(x.ch.title)}</button></span></td><td class="r">${x.n}/${x.qs.length}</td><td class="r" style="color:${x.acc < 70 ? "var(--red)" : "var(--ok)"};font-weight:700">${x.acc}%</td></tr>`).join("")}</tbody></table></div></section>` : ""; })()}
+      <section class="panel"><h2 class="sec-title">${icon("refresh")}別の端末・ブラウザへ移す</h2>
         <p class="small muted">学習記録はこのブラウザの中だけに保存され、外部には送信しません。下の「コピー」で記録を文字列としてコピーし、移し先で「貼り付けて読み込む」に貼り付けてください。</p>
         <textarea class="io" id="io" spellcheck="false" aria-label="学習記録のデータ"></textarea>
         <div class="row"><button class="btn" type="button" id="io-copy">記録をコピー</button><button class="btn" type="button" id="io-load">貼り付けて読み込む</button><button class="btn danger" type="button" id="io-reset">記録を消す</button></div>
         <div id="io-confirm"></div>
       </section></div>`;
+    app.querySelectorAll("[data-chap]").forEach(b => b.addEventListener("click", () => go("book", { ch: b.dataset.chap })));
     const ta = $("#io"); ta.value = JSON.stringify(prog);
     $("#io-copy").addEventListener("click", () => {
       ta.value = JSON.stringify(prog);

@@ -1,7 +1,7 @@
 // 生成物（tools/build_pwa.py が作る）。直接編集しない。
 // 最初に開いたときに app/ の全ファイルをキャッシュし、以後はキャッシュから表示する（オフライン対応）。
 // 新しい版は、アプリ側の「更新する」ボタン（SKIP_WAITING）で切り替える。
-const VERSION = "04f053a5370f";
+const VERSION = "9c62b1938c8a";
 const CACHE = "kashikin-" + VERSION;
 const FONT_CACHE = "kashikin-fonts";
 const FILES = ["app.js", "index.html", "style.css", "data/cards.js", "data/explanations.js", "data/laws_index.js", "data/questions.js", "data/textbook.js", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "laws/L01.js", "laws/L02.js", "laws/L03.js", "laws/L04.js", "laws/L05.js", "laws/L06.js", "laws/L07.js", "laws/L08.js", "laws/L09.js", "laws/L10.js", "laws/L11.js", "laws/L12.js", "laws/L13.js", "laws/L14.js", "laws/L15.js", "laws/L16.js", "laws/L17.js", "laws/L18.js", "laws/L19.js", "laws/L20.js", "laws/L21.js", "laws/L22.js", "laws/L23.js", "laws/L24.js", "laws/L25.js", "laws/L26.js", "laws/L27.js", "laws/L28.js", "laws/L29.js", "laws/L30.js", "laws/L31.js", "laws/L32.js", "laws/L33.js", "laws/L34.js", "laws/L35.js", "laws/L36.js", "laws/L37.js", "laws/L38.js", "manifest.webmanifest"];
