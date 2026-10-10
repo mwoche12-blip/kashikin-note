@@ -340,31 +340,71 @@
     const re = new RegExp(ch.q);
     return QUESTIONS.filter(q => q.subject === ch.subject && re.test(q.stem));
   }
-  function renderBook() {
-    if (!TEXTBOOK.length) { app.innerHTML = `<div class="narrow panel"><p>教科書データがありません。</p></div>`; return; }
-    const all = []; TEXTBOOK.forEach(sec => sec.chapters.forEach(ch => all.push(Object.assign({ subject: sec.subject }, ch))));
-    const cur = all.find(c => c.id === view.ch) || all[0];
+  // スマホ（幅760px以下）は目次をアコーディオンにし、押した章の本文を題名の直下に開く。PCは左に目次・右に本文
+  const BOOK_MQ = window.matchMedia ? window.matchMedia("(max-width: 760px)") : { matches: false };
+  if (BOOK_MQ.addEventListener) BOOK_MQ.addEventListener("change", () => { if (view.name === "book") render(); });
+  function chapterBody(cur, all, withTitle) {
     const idx = all.indexOf(cur);
     const qs = chapterQuestions(cur);
     const tfs = TF_ITEMS.filter(it => qs.some(q => q.id === it.qid));
-    app.innerHTML = `<div class="book">
-      <nav class="toc panel" aria-label="目次">${TEXTBOOK.map(sec => `<div><h3><span class="dot" style="background:var(--s${sec.subject})"></span>${esc(SUBJECTS[sec.subject].name)}</h3><ol>${sec.chapters.map(ch => `<li><button type="button" data-ch="${ch.id}" aria-current="${ch.id === cur.id}">${esc(ch.title)}</button></li>`).join("")}</ol></div>`).join("")}</nav>
-      <article class="chapter fade-in">
-        <span class="chip s${cur.subject}" style="justify-self:start">${esc(SUBJECTS[cur.subject].name)}</span>
-        <h1>${esc(cur.title)}</h1>
+    return `${withTitle ? `<span class="chip s${cur.subject}" style="justify-self:start">${esc(SUBJECTS[cur.subject].name)}</span><h1>${esc(cur.title)}</h1>` : ""}
         ${cur.lead ? `<p class="lead">${rich(cur.lead)}</p>` : ""}
         ${(cur.body || []).map(renderBlock).join("")}
-        <div class="panel" style="background:var(--paper)">
+        <div class="panel" style="background:var(--paper);box-shadow:none">
           <h3 style="border:0;margin:0;padding:0">この章の過去問</h3>
           ${qs.length ? `<p class="small muted">問題文から「${esc(cur.title)}」に関係する問題を${qs.length}問見つけました（${tfs.length}肢）。</p>
           <div class="row"><button class="btn primary" type="button" id="ch-quiz">4択で解く（${Math.min(qs.length, 20)}問）</button><button class="btn" type="button" id="ch-tf" ${tfs.length ? "" : "disabled"}>〇×で解く（${Math.min(tfs.length, 20)}肢）</button></div>`
           : `<p class="small muted">この章に対応づけた過去問はまだありません。</p>`}
         </div>
-        <div class="nav-row">${idx > 0 ? `<button class="btn ghost" type="button" data-ch="${all[idx - 1].id}">← ${esc(all[idx - 1].title)}</button>` : "<span></span>"}${idx < all.length - 1 ? `<button class="btn ghost" type="button" data-ch="${all[idx + 1].id}">${esc(all[idx + 1].title)} →</button>` : ""}</div>
-      </article></div>`;
-    app.querySelectorAll("[data-ch]").forEach(b => b.addEventListener("click", () => go("book", { ch: b.dataset.ch })));
+        <div class="nav-row">${idx > 0 ? `<button class="btn ghost" type="button" data-ch="${all[idx - 1].id}">← ${esc(all[idx - 1].title)}</button>` : "<span></span>"}${idx < all.length - 1 ? `<button class="btn ghost" type="button" data-ch="${all[idx + 1].id}">${esc(all[idx + 1].title)} →</button>` : ""}</div>`;
+  }
+  function bindChapter(cur) {
+    const qs = chapterQuestions(cur);
+    const tfs = TF_ITEMS.filter(it => qs.some(q => q.id === it.qid));
     const qb = $("#ch-quiz"); if (qb) qb.addEventListener("click", () => startQuiz({ mode: "practice", title: cur.title, ids: shuffle(qs).slice(0, 20).map(q => q.id), back: { name: "book", ch: cur.id } }));
     const tb = $("#ch-tf"); if (tb) tb.addEventListener("click", () => startQuiz({ mode: "tf", title: cur.title + "（〇×）", items: shuffle(tfs).slice(0, 20), back: { name: "book", ch: cur.id } }));
+  }
+  function renderBook() {
+    if (!TEXTBOOK.length) { app.innerHTML = `<div class="narrow panel"><p>教科書データがありません。</p></div>`; return; }
+    const all = ALL_CHAPTERS;
+    if (BOOK_MQ.matches) return renderBookAccordion(all);
+    const cur = all.find(c => c.id === view.ch) || all[0];
+    app.innerHTML = `<div class="book">
+      <nav class="toc panel" aria-label="目次">${TEXTBOOK.map(sec => `<div><h3><span class="dot" style="background:var(--s${sec.subject})"></span>${esc(SUBJECTS[sec.subject].name)}</h3><ol>${sec.chapters.map(ch => `<li><button type="button" data-ch="${ch.id}" aria-current="${ch.id === cur.id}">${esc(ch.title)}</button></li>`).join("")}</ol></div>`).join("")}</nav>
+      <article class="chapter fade-in">${chapterBody(cur, all, true)}</article></div>`;
+    app.querySelectorAll("[data-ch]").forEach(b => b.addEventListener("click", () => go("book", { ch: b.dataset.ch })));
+    bindChapter(cur);
+  }
+  function renderBookAccordion(all) {
+    const cur = all.find(c => c.id === view.ch) || null;
+    let n = 0;
+    app.innerHTML = `<div class="narrow fade-in">
+      <h1 class="page-title">${icon("book")}教科書</h1>
+      <p class="small muted">4分野・${all.length}章。題名を押すと、そのすぐ下に本文が開きます。もう一度押すと閉じます。</p>
+      ${TEXTBOOK.map(sec => `<section class="acc-sec">
+        <h2 class="acc-sec-title"><span class="dot" style="background:var(--s${sec.subject})"></span>${esc(SUBJECTS[sec.subject].name)}<span class="small muted">${sec.chapters.length}章</span></h2>
+        <ol class="acc">${sec.chapters.map(c => {
+          const ch = all.find(x => x.id === c.id); const st = chapterStats(ch); const open = cur && cur.id === ch.id; n++;
+          return `<li class="acc-item ${open ? "open" : ""}" id="acc-${ch.id}">
+            <button type="button" class="acc-head" data-acc="${ch.id}" aria-expanded="${open}">
+              <span class="acc-no" style="color:var(--s${ch.subject})">${n}</span>
+              <span class="acc-title">${esc(ch.title)}<small>${st.qs.length ? `過去問 ${st.qs.length}問` : ""}${st.n ? `・正答率 ${st.acc}%` : ""}</small></span>
+              <svg class="ic acc-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            ${open ? `<article class="acc-body fade-in">${chapterBody(ch, all, false)}</article>` : ""}
+          </li>`; }).join("")}</ol></section>`).join("")}
+    </div>`;
+    app.querySelectorAll("[data-acc]").forEach(b => b.addEventListener("click", () => {
+      const id = b.dataset.acc;
+      if (cur && cur.id === id) { view.ch = null; render(); const el = $("#acc-" + id); if (el) el.scrollIntoView({ block: "nearest" }); }
+      else go("book", { ch: id });
+    }));
+    app.querySelectorAll("[data-ch]").forEach(b => b.addEventListener("click", () => go("book", { ch: b.dataset.ch })));
+    if (cur) {
+      bindChapter(cur);
+      // go() が先頭へスクロールした後に、開いた章の題名を画面の上端へ
+      requestAnimationFrame(() => { const el = $("#acc-" + cur.id); if (el) el.scrollIntoView({ block: "start" }); });
+    }
   }
   function renderBlock(b) {
     const [type, val] = b;
